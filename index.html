@@ -551,6 +551,9 @@
         function initCanvasEvents() {
             const container = document.getElementById('canvas-container');
 
+            // --- Bloquer le menu clic droit natif pour permettre le Pan au clic droit ---
+            container.addEventListener('contextmenu', e => e.preventDefault());
+
             // --- Drop from sidebar ---
             container.addEventListener('dragover', e => e.preventDefault());
             container.addEventListener('drop', (e) => {
@@ -596,8 +599,8 @@
             container.addEventListener('mousedown', (e) => {
                 const isBackgroundClick = e.target.id === 'canvas-container' || e.target.id === 'workspace' || e.target.id === 'edges-layer' || e.target.tagName.toLowerCase() === 'svg';
 
-                // Condition pour le Panning : Clic molette OU (Clic gauche + Espace) OU (Clic gauche sur le fond sans Shift)
-                if (e.button === 1 || (e.button === 0 && isSpaceDown) || (e.button === 0 && isBackgroundClick && !e.shiftKey)) {
+                // Condition pour le Panning : Clic droit (2) OU Clic molette (1) OU (Clic gauche + Espace) OU (Clic gauche sur le fond sans Shift)
+                if (e.button === 2 || e.button === 1 || (e.button === 0 && isSpaceDown) || (e.button === 0 && isBackgroundClick && !e.shiftKey)) {
                     isPanning = true;
                     panStart = { x: e.clientX - panX, y: e.clientY - panY };
                     container.style.cursor = 'grabbing';
