@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgroFlow - Éditeur de Procédés</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- Icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; user-select: none; }
+        
+        .grid-bg {
+            background-color: #f8fafc;
+            background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        /* ISO 5807 Shapes via CSS/SVG */
+        .node {
+            position: absolute;
+            cursor: grab;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: #1e293b;
+            box-sizing: border-box;
+            transition: filter 0.1s;
+        }
+        .node:active { cursor: grabbing; }
+        .node.selected {
+            filter: drop-shadow(0 0 0 3px #3b82f6) drop-shadow(0 4px 6px rgba(0,0,0,0.1));
+            z-index: 10;
+        }
+
+        /* Forme: Opération Unitaire (Rectangle ISO) */
+        .shape-operation {
+            background: #dbeafe;
+            border: 2px solid #3b82f6;
+            border-radius: 4px;
+            width: 140px;
+            height: 60px;
+        }
+
+        /* Forme: Matière / Entrée-Sortie (Parallélogramme ISO) */
+        .shape-ingredient {
+            width: 140px;
+            height: 60px;
+            position: relative;
+        }
+        .shape-ingredient::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #d1fae5;
+            border: 2px solid #10b981;
+            transform: skew(-20deg);
+            z-index: -1;
+            border-radius: 2px;
+        }
+
+        /* Forme: Décision / CCP (Losange ISO) */
+        .shape-ccp {
+            width: 140px;
+            height: 80px;
+            position: relative;
+        }
+        .shape-ccp::before {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 90px; height: 90px;
+            background: #fee2e2;
+            border: 2px solid #ef4444;
+            transform: translate(-50%, -50%) rotate(45deg);
+            z-index: -1;
+            border-radius: 2px;
+        }
+
+        /* Forme: Terminaison / Produit (Ovale ISO) */
+        .shape-output {
+            background: #f3e8ff;
+            border: 2px solid #a855f7;
+            border-radius: 40px;
+            width: 140px;
+            height: 60px;
+        }
+
+        /* Forme: Processus Prédéfini */
+        .shape-predefined {
+            background: #e0e7ff;
+            border: 2px solid #4f46e5;
+            width: 140px;
+            height: 60px;
+            position: relative;
+        }
+        .shape-predefined::before, .shape-predefined::after {
+            content: '';
+            position: absolute;
+            top: 0; bottom: 0;
+            width: 12px;
+            border-left: 2px solid #4f46e5;
+            border-right: 2px solid #4f46e5;
+        }
+        .shape-predefined::before { left: 10px; border-right: none; }
+        .shape-predefined::after { right: 10px; border-left: none; }
+
+        /* Forme: Document */
+        .shape-document {
+            width: 140px;
+            height: 70px;
+            background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" viewBox="0 0 100 100"><path d="M0,0 H100 V80 Q75,100 50,80 T0,80 Z" fill="%23fef3c7" stroke="%23d97706" stroke-width="2"/></svg>') no-repeat center;
+            background-size: 100% 100%;
+        }
+
+        /* SVG Edges */
+        #edges-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            overflow: visible;
+        }
+        
+        .edge-path {
+            fill: none;
+            stroke: #64748b;
+            stroke-width: 2.5;
+            pointer-events: stroke;
+            cursor: pointer;
+            transition: stroke 0.2s, stroke-width 0.2s;
+        }
+        .edge-path:hover {
+            stroke: #3b82f6;
+            stroke-width: 4;
+        }
+        .edge-path.selected {
+            stroke: #3b82f6;
+            stroke-width: 4;
+            filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.5));
+        }
+
+        /* Connection Points */
+        .conn-point {
+            position: absolute;
+            width: 12px; height: 12px;
+            background: #fff;
+            border: 2px solid #64748b;
+            border-radius: 50%;
+            z-index: 20;
+            cursor: crosshair;
+            opacity: 0;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+        .node:hover .conn-point, .conn-point:hover, .conn-point.active {
+            opacity: 1;
+        }
+        .conn-point:hover { transform: scale(1.3); border-color: #3b82f6; }
+        
+        .cp-top { top: -6px; left: calc(50% - 6px); }
+        .cp-bottom { bottom: -6px; left: calc(50% - 6px); }
+        .cp-left { left: -6px; top: calc(50% - 6px); }
+        .cp-right { right: -6px; top: calc(50% - 6px); }
+
+        /* Edge Labels */
+        .edge-label {
+            position: absolute;
+            background: white;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 10px;
+            color: #334155;
+            transform: translate(-50%, -50%);
+            pointer-events: auto;
+            cursor: pointer;
+            z-index: 15;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .edge-label.selected {
+            border-color: #3b82f6;
+            color: #1d4ed8;
+            font-weight: bold;
+        }
+
+        /* Lasso Box */
+        #lasso-box {
+            position: absolute;
+            border: 2px dashed #3b82f6;
+            background-color: rgba(59, 130, 246, 0.2);
+            pointer-events: none;
+            display: none;
+            z-index: 9999;
+        }
+
+        /* UI Overlays */
+        #kpi-dashboard {
+            backdrop-filter: blur(4px);
+        }
+        
+        /* Toast Notification */
+        #toast {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(100px);
+            background: #1e293b; color: white; padding: 10px 20px; border-radius: 8px;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 10000; font-size: 14px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+        #toast.show { transform: translateX(-50%) translateY(0); }
+    </style>
+</head>
+<body class="flex flex-col h-screen overflow-hidden bg-gray-100 text-gray-800">
+
+    <!-- TOPBAR -->
+    <header class="h-14 bg-slate-900 text-white flex items-center justify-between px-6 shadow-md z-30 shrink-0">
+        <div class="flex items-center space-x-3">
+            <i class="fa-solid fa-industry text-blue-400 text-xl"></i>
+            <h1 class="text-lg font-bold tracking-wide">AgroFlow <span class="text-xs font-normal text-slate-400 ml-1">ISO 5807</span></h1>
+        </div>
+
+        <div class="flex items-center space-x-4">
+            <!-- Connection Style Selector -->
+            <div class="flex items-center space-x-2 mr-4 bg-slate-800 px-3 py-1.5 rounded-md">
+                <span class="text-xs text-slate-400">Flèches:</span>
+                <select id="edge-style" class="bg-slate-700 text-white text-xs border-none outline-none cursor-pointer rounded px-1">
+                    <option value="orthogonal">Coudées (Orthogonal)</option>
+                    <option value="straight">Droites</option>
+                    <option value="curved">Courbes</option>
+                </select>
+            </div>
+
+            <button onclick="undo()" class="hover:text-blue-300 transition-colors tooltip" title="Annuler (Ctrl+Z)"><i class="fa-solid fa-rotate-left"></i></button>
+            <button onclick="redo()" class="hover:text-blue-300 transition-colors tooltip" title="Rétablir (Ctrl+Y)"><i class="fa-solid fa-rotate-right"></i></button>
+            
+            <div class="w-px h-6 bg-slate-700 mx-2"></div>
+
+            <button onclick="exportImage()" class="flex items-center space-x-2 bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded text-sm font-medium transition-colors">
+                <i class="fa-solid fa-camera"></i> <span>Exporter Image</span>
+            </button>
+            <button onclick="clearCanvas()" class="flex items-center space-x-2 bg-red-600/20 text-red-400 hover:bg-red-600 hover:text-white px-3 py-1.5 rounded text-sm font-medium transition-colors">
+                <i class="fa-solid fa-trash"></i> <span>Nouveau</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- WORKSPACE -->
+    <div class="flex flex-1 h-[calc(100vh-3.5rem)] relative">
+        
+        <!-- SIDEBAR: ISO Blocks -->
+        <aside class="w-64 bg-white border-r border-slate-200 flex flex-col z-20 shadow-[4px_0_10px_rgba(0,0,0,0.05)]">
+            <div class="p-4 border-b border-slate-100 bg-slate-50">
+                <h2 class="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center">
+                    <i class="fa-solid fa-shapes mr-2 text-blue-500"></i> Formes ISO 5807
+                </h2>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 space-y-4" id="drag-items">
+                <!-- Les blocs sont injectés en JS -->
+            </div>
+            <div class="p-4 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 space-y-2">
+                <p><i class="fa-solid fa-mouse-pointer mr-1"></i> <b>Maj + Clic/Glisser</b> : Sélection multiple (Lasso)</p>
+                <p><i class="fa-brands fa-windows mr-1"></i> <b>Ctrl + C / V</b> : Copier/Coller</p>
+                <p><i class="fa-solid fa-arrows-up-down-left-right mr-1"></i> <b>Espace + Glisser</b> : Déplacer la vue (Pan)</p>
+                <p><i class="fa-solid fa-magnifying-glass mr-1"></i> <b>Molette</b> : Zoomer</p>
+            </div>
+        </aside>
+
+        <!-- MAIN CANVAS AREA -->
+        <main id="canvas-container" class="flex-1 relative overflow-hidden grid-bg cursor-grab">
+            <!-- KPIs Dashboard -->
+            <div id="kpi-dashboard" class="absolute top-4 left-4 bg-white/90 border border-slate-200 p-3 rounded-lg shadow-sm z-30 flex space-x-4 pointer-events-none">
+                <div class="text-center">
+                    <div class="text-[10px] uppercase text-slate-500 font-bold">Temps Total</div>
+                    <div class="text-lg font-black text-blue-600"><span id="kpi-time">0</span> min</div>
+                </div>
+                <div class="w-px bg-slate-200"></div>
+                <div class="text-center">
+                    <div class="text-[10px] uppercase text-slate-500 font-bold">T° Max</div>
+                    <div class="text-lg font-black text-red-500"><span id="kpi-temp">-</span> °C</div>
+                </div>
+                <div class="w-px bg-slate-200"></div>
+                <div class="text-center">
+                    <div class="text-[10px] uppercase text-slate-500 font-bold">Points Critiques</div>
+                    <div class="text-lg font-black text-orange-500"><span id="kpi-ccp">0</span> CCP</div>
+                </div>
+            </div>
+
+            <!-- Navigation Controls (Bottom Left) -->
+            <div class="absolute bottom-4 left-4 bg-white border border-slate-200 rounded-lg shadow-sm z-30 flex flex-col overflow-hidden">
+                <button onclick="zoomIn()" class="p-2 hover:bg-slate-100 text-slate-600 tooltip" title="Zoom +"><i class="fa-solid fa-plus"></i></button>
+                <div class="h-px bg-slate-200"></div>
+                <button onclick="zoomOut()" class="p-2 hover:bg-slate-100 text-slate-600 tooltip" title="Zoom -"><i class="fa-solid fa-minus"></i></button>
+                <div class="h-px bg-slate-200"></div>
+                <button onclick="resetView()" class="p-2 hover:bg-slate-100 text-slate-600 tooltip" title="Recentrer"><i class="fa-solid fa-expand"></i></button>
+            </div>
+
+            <!-- Lasso Selection Box -->
+            <div id="lasso-box"></div>
+
+            <!-- The Scalable/Pannable Workspace -->
+            <div id="workspace" class="absolute top-0 left-0 w-full h-full transform-origin-top-left" style="transform: translate(0px, 0px) scale(1);">
+                <!-- SVG Layer for Edges -->
+                <svg id="edges-layer">
+                    <defs>
+                        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+                        </marker>
+                        <marker id="arrowhead-selected" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                            <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6" />
+                        </marker>
+                    </defs>
+                    <g id="edges-group"></g>
+                </svg>
+                
+                <!-- HTML Layer for Nodes -->
+                <div id="nodes-layer" class="absolute top-0 left-0 w-full h-full pointer-events-none">
+                    <!-- Nodes will be injected here -->
+                </div>
+            </div>
+        </main>
+
+        <!-- PROPERTIES PANEL -->
+        <aside id="properties-panel" class="w-80 bg-white border-l border-slate-200 flex flex-col z-20 shadow-[-4px_0_10px_rgba(0,0,0,0.02)] hidden">
+            <div class="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                <h2 class="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center">
+                    <i class="fa-solid fa-sliders mr-2 text-blue-500"></i> Propriétés
+                </h2>
+                <span id="multi-selection-badge" class="hidden text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded font-bold"></span>
+            </div>
+            
+            <div class="p-5 flex-1 overflow-y-auto space-y-4" id="props-content">
+                <!-- Content dynamically injected based on selection -->
+            </div>
+        </aside>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast">Message</div>
+
+    <script>
+        // ==========================================
+        // 1. STATE MANAGEMENT & DATA MODEL
+        // ==========================================
+        
+        let nodes = [];
+        let edges = [];
+        
+        let selectedNodeIds = new Set(); // Multi-selection Set
+        let selectedEdgeId = null;
+        
+        // Canvas Navigation
+        let scale = 1;
+        let panX = 0;
+        let panY = 0;
+        let isPanning = false;
+        let panStart = { x: 0, y: 0 };
+        
+        // Dragging Nodes
+        let isDraggingNodes = false;
+        let dragNodesStart = []; // Stores initial positions of all dragged nodes
+        let dragStartMouse = { x: 0, y: 0 };
+        
+        // Edge Creation
+        let isCreatingEdge = false;
+        let edgeStartNode = null;
+        let edgeStartHandle = null; // top, right, bottom, left
+        let edgeCurrentMouse = { x: 0, y: 0 };
+
+        // Lasso Selection
+        let isLassoing = false;
+        let lassoStart = { x: 0, y: 0 };
+        
+        // Clipboard
+        let clipboard = { nodes: [], edges: [] };
+        
+        // History (Undo/Redo)
+        let history = [];
+        let historyIndex = -1;
+
+        // Constants
+        const SNAP_GRID = 20;
+
+        // Block Types Definition (ISO 5807)
+        const blockTypes = {
+            ingredient: { shape: 'shape-ingredient', label: 'Entrée / Sortie', icon: 'fa-box-open' },
+            operation: { shape: 'shape-operation', label: 'Processus', icon: 'fa-gear' },
+            predefined: { shape: 'shape-predefined', label: 'Processus Prédéfini', icon: 'fa-bars-progress' },
+            ccp: { shape: 'shape-ccp', label: 'Décision / CCP', icon: 'fa-code-branch' },
+            document: { shape: 'shape-document', label: 'Document', icon: 'fa-file-lines' },
+            output: { shape: 'shape-output', label: 'Début / Fin', icon: 'fa-flag-checkered' }
+        };
+
+        // ==========================================
+        // 2. INITIALIZATION & CORE FUNCTIONS
+        // ==========================================
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initSidebar();
+            initCanvasEvents();
+            loadState();
+            renderAll();
+        });
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2500);
+        }
+
+        function generateId() {
+            return Math.random().toString(36).substr(2, 9);
+        }
+
+        function snapToGrid(val) {
+            return Math.round(val / SNAP_GRID) * SNAP_GRID;
+        }
+
+        // --- Viewport Math ---
+        function getCanvasMouse(e) {
+            const rect = document.getElementById('canvas-container').getBoundingClientRect();
+            // X and Y considering the scale and pan
+            return {
+                x: (e.clientX - rect.left - panX) / scale,
+                y: (e.clientY - rect.top - panY) / scale
+            };
+        }
+        
+        function getRawMouse(e) {
+            const rect = document.getElementById('canvas-container').getBoundingClientRect();
+            return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        }
+
+        // ==========================================
+        // 3. HISTORY (UNDO/REDO) & STORAGE
+        // ==========================================
+
+        function saveStateToHistory() {
+            const currentState = JSON.stringify({ nodes, edges });
+            
+            // If state hasn't changed, don't save
+            if (historyIndex >= 0 && history[historyIndex] === currentState) return;
+
+            // Remove future redo states
+            history = history.slice(0, historyIndex + 1);
+            history.push(currentState);
+            
+            // Keep history length reasonable
+            if (history.length > 30) history.shift();
+            else historyIndex++;
+
+            persistData();
+            updateKPIs();
+        }
+
+        function undo() {
+            if (historyIndex > 0) {
+                historyIndex--;
+                loadStateFromHistoryString(history[historyIndex]);
+            } else {
+                showToast("Rien à annuler");
+            }
+        }
+
+        function redo() {
+            if (historyIndex < history.length - 1) {
+                historyIndex++;
+                loadStateFromHistoryString(history[historyIndex]);
+            } else {
+                showToast("Rien à rétablir");
+            }
+        }
+
+        function loadStateFromHistoryString(str) {
+            try {
+                const data = JSON.parse(str);
+                nodes = data.nodes || [];
+                edges = data.edges || [];
+                selectedNodeIds.clear();
+                selectedEdgeId = null;
+                renderAll();
+                updateKPIs();
+                persistData(false); // save to localstorage without adding to history
+            } catch (e) {
+                console.error("History parse error", e);
+            }
+        }
+
+        function persistData(pushHistory = true) {
+            localStorage.setItem('agroflow_data', JSON.stringify({ nodes, edges }));
+        }
+
+        function loadState() {
+            try {
+                const data = JSON.parse(localStorage.getItem('agroflow_data'));
+                if (data && data.nodes) {
+                    nodes = data.nodes;
+                    edges = data.edges || [];
+                    saveStateToHistory(); // Initial state
+                } else {
+                    saveStateToHistory(); // Empty state
+                }
+            } catch (e) {
+                console.error("Local storage error, clearing.");
+                saveStateToHistory();
+            }
+        }
+
+        function clearCanvas() {
+            if(confirm("Effacer tout le diagramme ?")) {
+                nodes = [];
+                edges = [];
+                selectedNodeIds.clear();
+                selectedEdgeId = null;
+                panX = 0; panY = 0; scale = 1;
+                saveStateToHistory();
+                renderAll();
+                showToast("Nouveau diagramme créé");
+            }
+        }
+
+        // ==========================================
+        // 4. SIDEBAR & DRAG AND DROP
+        // ==========================================
+
+        function initSidebar() {
+            const container = document.getElementById('drag-items');
+            for (const [type, config] of Object.entries(blockTypes)) {
+                const item = document.createElement('div');
+                item.className = 'flex items-center p-3 border border-slate-200 rounded-lg cursor-grab hover:bg-blue-50 transition-colors shadow-sm bg-white mb-3';
+                item.draggable = true;
+                item.innerHTML = `<i class="fa-solid ${config.icon} w-6 text-center text-slate-500 mr-2"></i><span class="text-sm font-medium text-slate-700">${config.label}</span>`;
+                
+                item.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.setData('type', type);
+                    e.dataTransfer.setData('label', config.label);
+                });
+                container.appendChild(item);
+            }
+        }
+
+        // ==========================================
+        // 5. CANVAS EVENTS (PAN, ZOOM, LASSO, SELECT)
+        // ==========================================
+
+        function initCanvasEvents() {
+            const container = document.getElementById('canvas-container');
+
+            // --- Drop from sidebar ---
+            container.addEventListener('dragover', e => e.preventDefault());
+            container.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const type = e.dataTransfer.getData('type');
+                if (!type) return;
+                const label = e.dataTransfer.getData('label');
+                const mouse = getCanvasMouse(e);
+                
+                const newNode = {
+                    id: generateId(),
+                    type: type,
+                    label: label,
+                    x: snapToGrid(mouse.x - 70), // Center the 140px node
+                    y: snapToGrid(mouse.y - 30), // Center the 60px node
+                    w: 140, h: type === 'ccp' ? 80 : (type === 'document' ? 70 : 60),
+                    temp: null, time: null, haccp: 'none'
+                };
+                nodes.push(newNode);
+                saveStateToHistory();
+                renderAll();
+            });
+
+            // --- Zoom (Wheel) ---
+            container.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                if(e.ctrlKey) return; // Browser zoom prevention ideally, but handled by e.preventDefault
+                
+                const zoomFactor = 0.1;
+                const direction = e.deltaY > 0 ? -1 : 1;
+                const newScale = Math.min(Math.max(0.3, scale + (direction * zoomFactor)), 3);
+                
+                // Calculate pan adjustment to zoom towards cursor
+                const raw = getRawMouse(e);
+                panX = raw.x - (raw.x - panX) * (newScale / scale);
+                panY = raw.y - (raw.y - panY) * (newScale / scale);
+                scale = newScale;
+                
+                applyTransform();
+            }, { passive: false });
+
+            // --- Mousedown (Pan, Lasso, Select) ---
+            container.addEventListener('mousedown', (e) => {
+                // Middle click OR Space+Left Click -> Pan
+                if (e.button === 1 || (e.button === 0 && e.code === 'Space')) {
+                    isPanning = true;
+                    panStart = { x: e.clientX - panX, y: e.clientY - panY };
+                    container.style.cursor = 'grabbing';
+                    return;
+                }
+
+                // If clicking directly on background (not a node/edge)
+                if (e.target.id === 'canvas-container' || e.target.id === 'workspace' || e.target.id === 'edges-layer') {
+                    if (e.shiftKey) {
+                        // Start Lasso
+                        isLassoing = true;
+                        const raw = getRawMouse(e);
+                        lassoStart = { x: raw.x, y: raw.y };
+                        
+                        const lassoBox = document.getElementById('lasso-box');
+                        lassoBox.style.display = 'block';
+                        lassoBox.style.left = raw.x + 'px';
+                        lassoBox.style.top = raw.y + 'px';
+                        lassoBox.style.width = '0px';
+                        lassoBox.style.height = '0px';
+                    } else {
+                        // Clear selection
+                        selectedNodeIds.clear();
+                        selectedEdgeId = null;
+                        renderAll();
+                        updatePropertiesPanel();
+                    }
+                }
+            });
+
+            // --- Mousemove (Pan, Drag nodes, Draw edge, Lasso) ---
+            window.addEventListener('mousemove', (e) => {
+                // Pan
+                if (isPanning) {
+                    panX = e.clientX - panStart.x;
+                    panY = e.clientY - panStart.y;
+                    applyTransform();
+                    return;
+                }
+
+                // Lasso
+                if (isLassoing) {
+                    const raw = getRawMouse(e);
+                    const rect = {
+                        x: Math.min(lassoStart.x, raw.x),
+                        y: Math.min(lassoStart.y, raw.y),
+                        w: Math.abs(raw.x - lassoStart.x),
+                        h: Math.abs(raw.y - lassoStart.y)
+                    };
+                    const lassoBox = document.getElementById('lasso-box');
+                    lassoBox.style.left = rect.x + 'px';
+                    lassoBox.style.top = rect.y + 'px';
+                    lassoBox.style.width = rect.w + 'px';
+                    lassoBox.style.height = rect.h + 'px';
+                    return;
+                }
+
+                // Drag Nodes
+                if (isDraggingNodes) {
+                    const mouse = getCanvasMouse(e);
+                    const dx = snapToGrid(mouse.x - dragStartMouse.x);
+                    const dy = snapToGrid(mouse.y - dragStartMouse.y);
+                    
+                    nodes.forEach(n => {
+                        if (selectedNodeIds.has(n.id)) {
+                            const startPos = dragNodesStart.find(ds => ds.id === n.id);
+                            if (startPos) {
+                                n.x = startPos.x + dx;
+                                n.y = startPos.y + dy;
+                            }
+                        }
+                    });
+                    
+                    renderNodesTransformOnly(); // Fast update
+                    renderEdges(); // Keep edges connected
+                    return;
+                }
+
+                // Draw Edge
+                if (isCreatingEdge) {
+                    edgeCurrentMouse = getCanvasMouse(e);
+                    renderEdges(); // Redraw edges to show temp line
+                }
+            });
+
+            // --- Mouseup (Finish Pan, Drag, Edge, Lasso) ---
+            window.addEventListener('mouseup', (e) => {
+                if (isPanning) {
+                    isPanning = false;
+                    container.style.cursor = 'grab';
+                }
+                
+                if (isDraggingNodes) {
+                    isDraggingNodes = false;
+                    // Check if actually moved to save state
+                    let moved = false;
+                    nodes.forEach(n => {
+                        if (selectedNodeIds.has(n.id)) {
+                            const start = dragNodesStart.find(ds => ds.id === n.id);
+                            if (start && (start.x !== n.x || start.y !== n.y)) moved = true;
+                        }
+                    });
+                    if (moved) saveStateToHistory();
+                }
+
+                if (isCreatingEdge) {
+                    isCreatingEdge = false;
+                    renderEdges(); // Remove temp line
+                }
+
+                if (isLassoing) {
+                    isLassoing = false;
+                    document.getElementById('lasso-box').style.display = 'none';
+                    
+                    // Calculate lasso rect in CANVAS coordinates
+                    const rawEnd = getRawMouse(e);
+                    const rawRect = {
+                        x: Math.min(lassoStart.x, rawEnd.x),
+                        y: Math.min(lassoStart.y, rawEnd.y),
+                        w: Math.abs(rawEnd.x - lassoStart.x),
+                        h: Math.abs(rawEnd.y - lassoStart.y)
+                    };
+                    
+                    // Convert raw rect to canvas coordinates
+                    const canvasLasso = {
+                        x: (rawRect.x - panX) / scale,
+                        y: (rawRect.y - panY) / scale,
+                        w: rawRect.w / scale,
+                        h: rawRect.h / scale
+                    };
+
+                    if (!e.ctrlKey) selectedNodeIds.clear(); // Keep existing if ctrl pressed
+
+                    // Find intersecting nodes
+                    nodes.forEach(n => {
+                        if (n.x < canvasLasso.x + canvasLasso.w &&
+                            n.x + n.w > canvasLasso.x &&
+                            n.y < canvasLasso.y + canvasLasso.h &&
+                            n.y + n.h > canvasLasso.y) {
+                            selectedNodeIds.add(n.id);
+                        }
+                    });
+                    
+                    renderNodesStyleOnly();
+                    updatePropertiesPanel();
+                }
+            });
+
+            // --- Keyboard Shortcuts (Copy, Paste, Undo, Redo, Delete) ---
+            window.addEventListener('keydown', (e) => {
+                // Don't trigger if typing in an input
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+                if (e.key === 'Delete' || e.key === 'Backspace') {
+                    deleteSelected();
+                }
+                else if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
+                    if (e.shiftKey) redo();
+                    else undo();
+                }
+                else if (e.ctrlKey && (e.key === 'y' || e.key === 'Y')) {
+                    redo();
+                }
+                else if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+                    copySelection();
+                }
+                else if (e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
+                    pasteSelection();
+                }
+            });
+
+            // Dropdown Edge Style
+            document.getElementById('edge-style').addEventListener('change', () => {
+                saveStateToHistory(); // trigger edge redraw technically not needed for history but good for consistency
+                renderEdges();
+            });
+        }
+
+        function zoomIn() { scale = Math.min(scale + 0.2, 3); applyTransform(); }
+        function zoomOut() { scale = Math.max(scale - 0.2, 0.3); applyTransform(); }
+        function resetView() { scale = 1; panX = 0; panY = 0; applyTransform(); }
+
+        function applyTransform() {
+            document.getElementById('workspace').style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+        }
+
+        // ==========================================
+        // 6. CLIPBOARD & DELETION
+        // ==========================================
+
+        function deleteSelected() {
+            let changed = false;
+            
+            if (selectedNodeIds.size > 0) {
+                // Remove edges connected to selected nodes
+                edges = edges.filter(e => !selectedNodeIds.has(e.from) && !selectedNodeIds.has(e.to));
+                // Remove nodes
+                nodes = nodes.filter(n => !selectedNodeIds.has(n.id));
+                selectedNodeIds.clear();
+                changed = true;
+            }
+            
+            if (selectedEdgeId) {
+                edges = edges.filter(e => e.id !== selectedEdgeId);
+                selectedEdgeId = null;
+                changed = true;
+            }
+
+            if (changed) {
+                saveStateToHistory();
+                renderAll();
+                updatePropertiesPanel();
+            }
+        }
+
+        function copySelection() {
+            if (selectedNodeIds.size === 0) return;
+            
+            clipboard.nodes = nodes.filter(n => selectedNodeIds.has(n.id)).map(n => JSON.parse(JSON.stringify(n)));
+            clipboard.edges = edges.filter(e => selectedNodeIds.has(e.from) && selectedNodeIds.has(e.to)).map(e => JSON.parse(JSON.stringify(e)));
+            
+            showToast(`${clipboard.nodes.length} élément(s) copié(s)`);
+        }
+
+        function pasteSelection() {
+            if (!clipboard.nodes || clipboard.nodes.length === 0) return;
+
+            const idMap = {}; // Map old IDs to new IDs
+            selectedNodeIds.clear(); // Clear current selection
+            
+            // Paste Nodes
+            clipboard.nodes.forEach(n => {
+                const newId = generateId();
+                idMap[n.id] = newId;
+                const newNode = { ...n, id: newId, x: n.x + 30, y: n.y + 30 }; // Offset
+                nodes.push(newNode);
+                selectedNodeIds.add(newId);
+            });
+
+            // Paste Edges (internal to selection)
+            clipboard.edges.forEach(e => {
+                edges.push({
+                    ...e,
+                    id: generateId(),
+                    from: idMap[e.from],
+                    to: idMap[e.to]
+                });
+            });
+
+            saveStateToHistory();
+            renderAll();
+            updatePropertiesPanel();
+            showToast("Collé");
+        }
+
+        // ==========================================
+        // 7. RENDERING (HTML Nodes + SVG Edges)
+        // ==========================================
+
+        function renderAll() {
+            renderNodesFull();
+            renderEdges();
+        }
+
+        function renderNodesFull() {
+            const container = document.getElementById('nodes-layer');
+            container.innerHTML = ''; // Clear
+
+            nodes.forEach(node => {
+                const config = blockTypes[node.type] || blockTypes.operation;
+                
+                const div = document.createElement('div');
+                div.id = `node-${node.id}`;
+                div.className = `node ${config.shape} pointer-events-auto ${selectedNodeIds.has(node.id) ? 'selected' : ''}`;
+                div.style.left = node.x + 'px';
+                div.style.top = node.y + 'px';
+
+                // Content
+                let haccpBadge = '';
+                if(node.haccp === 'ccp') haccpBadge = `<div class="absolute -top-3 -right-3 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full border-2 border-white shadow-sm z-10">CCP</div>`;
+                if(node.haccp === 'prpo') haccpBadge = `<div class="absolute -top-3 -right-3 bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full border-2 border-white shadow-sm z-10">PRPo</div>`;
+
+                let stats = '';
+                if(node.temp || node.time) {
+                    stats = `<div class="absolute -bottom-5 left-1/2 transform -translate-x-1/2 flex space-x-2 text-[10px] whitespace-nowrap bg-white/90 px-2 py-0.5 rounded shadow-sm border border-slate-200 z-10">
+                        ${node.temp ? `<span class="text-red-600 font-bold"><i class="fa-solid fa-temperature-half"></i> ${node.temp}°C</span>` : ''}
+                        ${node.time ? `<span class="text-blue-600 font-bold"><i class="fa-regular fa-clock"></i> ${node.time}m</span>` : ''}
+                    </div>`;
+                }
+
+                div.innerHTML = `
+                    ${haccpBadge}
+                    <div class="px-3 line-clamp-2">${node.label}</div>
+                    ${stats}
+                `;
+
+                // Connection Points
+                ['top', 'right', 'bottom', 'left'].forEach(pos => {
+                    const cp = document.createElement('div');
+                    cp.className = `conn-point cp-${pos}`;
+                    cp.dataset.node = node.id;
+                    cp.dataset.pos = pos;
+                    
+                    // Edge Creation Logic
+                    cp.addEventListener('mousedown', (e) => {
+                        e.stopPropagation(); // Don't drag node
+                        isCreatingEdge = true;
+                        edgeStartNode = node.id;
+                        edgeStartHandle = pos;
+                        edgeCurrentMouse = getCanvasMouse(e);
+                    });
+                    cp.addEventListener('mouseup', (e) => {
+                        e.stopPropagation();
+                        if (isCreatingEdge && edgeStartNode !== node.id) {
+                            // Finish Edge
+                            edges.push({
+                                id: generateId(),
+                                from: edgeStartNode,
+                                fromPos: edgeStartHandle,
+                                to: node.id,
+                                toPos: pos,
+                                label: ''
+                            });
+                            saveStateToHistory();
+                            renderEdges();
+                        }
+                    });
+                    
+                    div.appendChild(cp);
+                });
+
+                // Node Selection & Dragging
+                div.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    
+                    // Selection Logic
+                    if (e.ctrlKey) {
+                        // Toggle selection
+                        if (selectedNodeIds.has(node.id)) selectedNodeIds.delete(node.id);
+                        else selectedNodeIds.add(node.id);
+                    } else {
+                        // If clicking an unselected node without Ctrl, select ONLY it
+                        if (!selectedNodeIds.has(node.id)) {
+                            selectedNodeIds.clear();
+                            selectedNodeIds.add(node.id);
+                        }
+                    }
+                    
+                    selectedEdgeId = null;
+                    renderNodesStyleOnly();
+                    updatePropertiesPanel();
+
+                    // Start Drag
+                    isDraggingNodes = true;
+                    dragStartMouse = getCanvasMouse(e);
+                    dragNodesStart = nodes.filter(n => selectedNodeIds.has(n.id)).map(n => ({id: n.id, x: n.x, y: n.y}));
+                });
+
+                container.appendChild(div);
+            });
+        }
+
+        function renderNodesTransformOnly() {
+            // Fast update during drag
+            nodes.forEach(n => {
+                const el = document.getElementById(`node-${n.id}`);
+                if (el) {
+                    el.style.left = n.x + 'px';
+                    el.style.top = n.y + 'px';
+                }
+            });
+        }
+
+        function renderNodesStyleOnly() {
+            // Fast update for selection highlights
+            nodes.forEach(n => {
+                const el = document.getElementById(`node-${n.id}`);
+                if (el) {
+                    if (selectedNodeIds.has(n.id)) el.classList.add('selected');
+                    else el.classList.remove('selected');
+                }
+            });
+        }
+
+        function getHandleCoord(node, pos) {
+            if (!node) return {x:0, y:0};
+            switch(pos) {
+                case 'top': return { x: node.x + node.w/2, y: node.y };
+                case 'bottom': return { x: node.x + node.w/2, y: node.y + node.h };
+                case 'left': return { x: node.x, y: node.y + node.h/2 };
+                case 'right': return { x: node.x + node.w, y: node.y + node.h/2 };
+                default: return { x: node.x + node.w/2, y: node.y + node.h/2 };
+            }
+        }
+
+        function renderEdges() {
+            const group = document.getElementById('edges-group');
+            group.innerHTML = '';
+            
+            const htmlLayer = document.getElementById('nodes-layer');
+            // Remove old edge labels
+            document.querySelectorAll('.edge-label').forEach(el => el.remove());
+
+            const style = document.getElementById('edge-style').value;
+
+            // Render existing edges
+            edges.forEach(edge => {
+                const n1 = nodes.find(n => n.id === edge.from);
+                const n2 = nodes.find(n => n.id === edge.to);
+                if (!n1 || !n2) return;
+
+                const p1 = getHandleCoord(n1, edge.fromPos);
+                const p2 = getHandleCoord(n2, edge.toPos);
+
+                drawPath(group, htmlLayer, p1, p2, edge, style);
+            });
+
+            // Render temporary edge being created
+            if (isCreatingEdge) {
+                const n1 = nodes.find(n => n.id === edgeStartNode);
+                if (n1) {
+                    const p1 = getHandleCoord(n1, edgeStartHandle);
+                    drawPath(group, null, p1, edgeCurrentMouse, {id:'temp'}, style, true);
+                }
+            }
+        }
+
+        function drawPath(svgGroup, htmlLayer, p1, p2, edge, style, isTemp = false) {
+            let pathD = '';
+            
+            if (style === 'straight') {
+                pathD = `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y}`;
+            } else if (style === 'curved') {
+                // Simple bezier
+                const dx = Math.abs(p2.x - p1.x);
+                const dy = Math.abs(p2.y - p1.y);
+                const offset = Math.max(dx, dy) * 0.4;
+                pathD = `M ${p1.x} ${p1.y} C ${p1.x} ${p1.y + offset}, ${p2.x} ${p2.y - offset}, ${p2.x} ${p2.y}`;
+            } else {
+                // Orthogonal (Manhattan)
+                const midY = p1.y + (p2.y - p1.y) / 2;
+                pathD = `M ${p1.x} ${p1.y} L ${p1.x} ${midY} L ${p2.x} ${midY} L ${p2.x} ${p2.y}`;
+            }
+
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', pathD);
+            path.setAttribute('class', `edge-path ${edge.id === selectedEdgeId ? 'selected' : ''}`);
+            path.setAttribute('marker-end', edge.id === selectedEdgeId ? 'url(#arrowhead-selected)' : 'url(#arrowhead)');
+            
+            if (!isTemp) {
+                path.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    selectedNodeIds.clear();
+                    selectedEdgeId = edge.id;
+                    renderNodesStyleOnly();
+                    renderEdges(); // update colors
+                    updatePropertiesPanel();
+                });
+            } else {
+                path.style.strokeDasharray = "5,5";
+                path.style.opacity = "0.5";
+            }
+
+            svgGroup.appendChild(path);
+
+            // Draw Label HTML element
+            if (!isTemp && edge.label && htmlLayer) {
+                const labelDiv = document.createElement('div');
+                labelDiv.className = `edge-label ${edge.id === selectedEdgeId ? 'selected' : ''}`;
+                // Approximate middle point
+                labelDiv.style.left = (p1.x + p2.x)/2 + 'px';
+                labelDiv.style.top = (p1.y + p2.y)/2 + 'px';
+                labelDiv.innerText = edge.label;
+                
+                labelDiv.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    selectedNodeIds.clear();
+                    selectedEdgeId = edge.id;
+                    renderNodesStyleOnly();
+                    renderEdges();
+                    updatePropertiesPanel();
+                });
+                
+                htmlLayer.appendChild(labelDiv);
+            }
+        }
+
+        // ==========================================
+        // 8. PROPERTIES PANEL & KPIS
+        // ==========================================
+
+        function updatePropertiesPanel() {
+            const panel = document.getElementById('properties-panel');
+            const content = document.getElementById('props-content');
+            const badge = document.getElementById('multi-selection-badge');
+            
+            // Nothing selected
+            if (selectedNodeIds.size === 0 && !selectedEdgeId) {
+                panel.classList.add('hidden');
+                return;
+            }
+            
+            panel.classList.remove('hidden');
+
+            // Multiple Nodes Selected
+            if (selectedNodeIds.size > 1) {
+                badge.classList.remove('hidden');
+                badge.innerText = `${selectedNodeIds.size} blocs`;
+                content.innerHTML = `
+                    <div class="text-center py-10 text-slate-500">
+                        <i class="fa-solid fa-layer-group text-4xl mb-4 opacity-50"></i>
+                        <p class="font-bold">${selectedNodeIds.size} éléments sélectionnés</p>
+                        <p class="text-xs mt-2">Vous pouvez les déplacer, les copier (Ctrl+C) ou les supprimer (Suppr).</p>
+                    </div>
+                `;
+                return;
+            }
+
+            badge.classList.add('hidden');
+
+            // Single Edge Selected
+            if (selectedEdgeId) {
+                const edge = edges.find(e => e.id === selectedEdgeId);
+                content.innerHTML = `
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 mb-1">Texte sur la flèche</label>
+                        <input type="text" id="prop-edge-label" value="${edge.label || ''}" placeholder="Ex: Oui, Non, Conforme..." 
+                            class="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none">
+                    </div>
+                `;
+                document.getElementById('prop-edge-label').addEventListener('input', (e) => {
+                    edge.label = e.target.value;
+                    renderEdges();
+                    saveStateToHistory();
+                });
+                return;
+            }
+
+            // Single Node Selected
+            const id = Array.from(selectedNodeIds)[0];
+            const node = nodes.find(n => n.id === id);
+            if (!node) return;
+
+            content.innerHTML = `
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 mb-1">Nom de l'étape</label>
+                    <textarea id="prop-label" rows="2" class="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:border-blue-500 outline-none resize-none">${node.label}</textarea>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 mb-1">Température (°C)</label>
+                        <input type="number" id="prop-temp" value="${node.temp || ''}" placeholder="Ex: 72" class="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:border-red-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 mb-1">Durée (min)</label>
+                        <input type="number" id="prop-time" value="${node.time || ''}" placeholder="Ex: 15" class="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:border-blue-500 outline-none">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 mb-1">Statut Sanitaire (HACCP)</label>
+                    <select id="prop-haccp" class="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:border-orange-500 outline-none bg-white">
+                        <option value="none" ${node.haccp === 'none' ? 'selected' : ''}>Standard (Aucun)</option>
+                        <option value="prpo" ${node.haccp === 'prpo' ? 'selected' : ''}>PRPo (Programme Prérequis Opérationnel)</option>
+                        <option value="ccp" ${node.haccp === 'ccp' ? 'selected' : ''}>CCP (Point Critique de Contrôle)</option>
+                    </select>
+                </div>
+            `;
+
+            // Bind listeners
+            ['label', 'temp', 'time', 'haccp'].forEach(key => {
+                document.getElementById(`prop-${key}`).addEventListener('change', (e) => {
+                    let val = e.target.value;
+                    if (key === 'temp' || key === 'time') val = val ? parseFloat(val) : null;
+                    node[key] = val;
+                    saveStateToHistory();
+                    renderNodesFull();
+                    renderEdges(); // nodes might change size or have badges
+                    updatePropertiesPanel();
+                });
+            });
+        }
+
+        function updateKPIs() {
+            let totalTime = 0;
+            let maxTemp = -999;
+            let ccpCount = 0;
+
+            nodes.forEach(n => {
+                if (n.time) totalTime += n.time;
+                if (n.temp !== null && n.temp > maxTemp) maxTemp = n.temp;
+                if (n.haccp === 'ccp') ccpCount++;
+            });
+
+            document.getElementById('kpi-time').innerText = totalTime;
+            document.getElementById('kpi-temp').innerText = maxTemp === -999 ? '-' : maxTemp;
+            document.getElementById('kpi-ccp').innerText = ccpCount;
+        }
+
+        // ==========================================
+        // 9. EXPORT IMAGE
+        // ==========================================
+
+        async function exportImage() {
+            showToast("Génération de l'image en cours...");
+            
+            // 1. Temporarily deselect all to avoid blue borders in export
+            const oldSelection = new Set(selectedNodeIds);
+            const oldEdgeId = selectedEdgeId;
+            selectedNodeIds.clear();
+            selectedEdgeId = null;
+            renderNodesStyleOnly();
+            renderEdges();
+
+            // 2. Temporarily reset Pan & Zoom to capture everything
+            const workspace = document.getElementById('workspace');
+            const oldScale = scale;
+            const oldPanX = panX;
+            const oldPanY = panY;
+            
+            // Calculate bounding box of all nodes
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            if (nodes.length > 0) {
+                nodes.forEach(n => {
+                    if (n.x < minX) minX = n.x;
+                    if (n.y < minY) minY = n.y;
+                    if (n.x + n.w > maxX) maxX = n.x + n.w;
+                    if (n.y + n.h > maxY) maxY = n.y + n.h;
+                });
+            } else {
+                minX = 0; minY = 0; maxX = 800; maxY = 600;
+            }
+
+            // Add padding
+            const padding = 50;
+            minX -= padding; minY -= padding;
+            maxX += padding; maxY += padding;
+
+            // Apply specific transform for capture
+            workspace.style.transform = `translate(${-minX}px, ${-minY}px) scale(1)`;
+            // Expand workspace size to fit bounding box
+            const oldWidth = workspace.style.width;
+            const oldHeight = workspace.style.height;
+            workspace.style.width = (maxX - minX) + 'px';
+            workspace.style.height = (maxY - minY) + 'px';
+            workspace.classList.remove('absolute', 'w-full', 'h-full');
+
+            try {
+                const canvas = await html2canvas(workspace, {
+                    backgroundColor: '#f8fafc',
+                    scale: 2 // High resolution
+                });
+                
+                const link = document.createElement('a');
+                link.download = `AgroFlow_Export_${new Date().getTime()}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+                showToast("Export réussi !");
+            } catch (err) {
+                console.error(err);
+                showToast("Erreur lors de l'export.");
+            } finally {
+                // Restore state
+                workspace.style.width = oldWidth || '';
+                workspace.style.height = oldHeight || '';
+                workspace.classList.add('absolute', 'w-full', 'h-full');
+                scale = oldScale;
+                panX = oldPanX;
+                panY = oldPanY;
+                applyTransform();
+                
+                selectedNodeIds = oldSelection;
+                selectedEdgeId = oldEdgeId;
+                renderNodesStyleOnly();
+                renderEdges();
+            }
+        }
+    </script>
+</body>
+</html>
