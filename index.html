@@ -372,6 +372,9 @@
         let isLassoing = false;
         let lassoStart = { x: 0, y: 0 };
         
+        // Navigation (Touche Espace)
+        let isSpaceDown = false;
+        
         // Clipboard
         let clipboard = { nodes: [], edges: [] };
         
@@ -591,35 +594,36 @@
 
             // --- Mousedown (Pan, Lasso, Select) ---
             container.addEventListener('mousedown', (e) => {
-                // Middle click OR Space+Left Click -> Pan
-                if (e.button === 1 || (e.button === 0 && e.code === 'Space')) {
+                const isBackgroundClick = e.target.id === 'canvas-container' || e.target.id === 'workspace' || e.target.id === 'edges-layer' || e.target.tagName.toLowerCase() === 'svg';
+
+                // Condition pour le Panning : Clic molette OU (Clic gauche + Espace) OU (Clic gauche sur le fond sans Shift)
+                if (e.button === 1 || (e.button === 0 && isSpaceDown) || (e.button === 0 && isBackgroundClick && !e.shiftKey)) {
                     isPanning = true;
                     panStart = { x: e.clientX - panX, y: e.clientY - panY };
                     container.style.cursor = 'grabbing';
-                    return;
-                }
-
-                // If clicking directly on background (not a node/edge)
-                if (e.target.id === 'canvas-container' || e.target.id === 'workspace' || e.target.id === 'edges-layer') {
-                    if (e.shiftKey) {
-                        // Start Lasso
-                        isLassoing = true;
-                        const raw = getRawMouse(e);
-                        lassoStart = { x: raw.x, y: raw.y };
-                        
-                        const lassoBox = document.getElementById('lasso-box');
-                        lassoBox.style.display = 'block';
-                        lassoBox.style.left = raw.x + 'px';
-                        lassoBox.style.top = raw.y + 'px';
-                        lassoBox.style.width = '0px';
-                        lassoBox.style.height = '0px';
-                    } else {
-                        // Clear selection
+                    
+                    // Si on clique sur le fond sans Espace, on désélectionne les blocs
+                    if (isBackgroundClick && !e.shiftKey && !isSpaceDown) {
                         selectedNodeIds.clear();
                         selectedEdgeId = null;
                         renderAll();
                         updatePropertiesPanel();
                     }
+                    return;
+                }
+
+                // Lasso : Maj + Clic gauche sur le fond
+                if (e.button === 0 && isBackgroundClick && e.shiftKey) {
+                    isLassoing = true;
+                    const raw = getRawMouse(e);
+                    lassoStart = { x: raw.x, y: raw.y };
+                    
+                    const lassoBox = document.getElementById('lasso-box');
+                    lassoBox.style.display = 'block';
+                    lassoBox.style.left = raw.x + 'px';
+                    lassoBox.style.top = raw.y + 'px';
+                    lassoBox.style.width = '0px';
+                    lassoBox.style.height = '0px';
                 }
             });
 
@@ -746,7 +750,12 @@
                 // Don't trigger if typing in an input
                 if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-                if (e.key === 'Delete' || e.key === 'Backspace') {
+                if (e.code === 'Space') {
+                    isSpaceDown = true;
+                    container.style.cursor = 'grab';
+                    e.preventDefault(); // Empêche la page de défiler
+                }
+                else if (e.key === 'Delete' || e.key === 'Backspace') {
                     deleteSelected();
                 }
                 else if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
@@ -761,6 +770,13 @@
                 }
                 else if (e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
                     pasteSelection();
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                if (e.code === 'Space') {
+                    isSpaceDown = false;
+                    container.style.cursor = 'default';
                 }
             });
 
@@ -926,6 +942,8 @@
 
                 // Node Selection & Dragging
                 div.addEventListener('mousedown', (e) => {
+                    if (isSpaceDown) return; // Si Espace est maintenu, on ignore la sélection pour permettre le déplacement (Pan)
+                    
                     e.stopPropagation();
                     
                     // Selection Logic
